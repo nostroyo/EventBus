@@ -1,21 +1,22 @@
 unit UChannel;
 
 interface
+type
 
-  TChanel = class
+  TChannel = class
   strict private
     FName: string;
   public
     constructor Create(const AName: string);
   end;
 
-  TChannelBroadCast = class(TChanel)
+  TChannelBroadCast = class(TChannel)
 
   end;
 
 implementation
 
-constructor TChanel.Create(const AName: string);
+constructor TChannel.Create(const AName: string);
 begin
   FName := AName;
 end;

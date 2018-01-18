@@ -9,13 +9,51 @@ type
 TEventMsg = class(TInterfacedObject)
   strict private
     FEventDescr: string;
-    FChannel: TObjectList<TChannel>;
+    FChannels: TObjectList<TChannel>;
   public
     constructor Create(AChannel: TChannel);
+    destructor Destroy; override;
+
+    function GetChannelCount: Integer;
+    procedure AddChannel(AChannel: TChannel);
+    function GetChannelByIndex(AIndex: Integer): TChannel;
 
     property Descrition: string read FEventDescr write FEventDescr;
+
 end;
 
 implementation
+
+{ TEventMsg }
+
+procedure TEventMsg.AddChannel(AChannel: TChannel);
+begin
+  FChannels.Add(AChannel);
+end;
+
+constructor TEventMsg.Create(AChannel: TChannel);
+begin
+  Assert(Assigned(AChannel));
+  FChannels := TObjectList<TChannel>.Create;
+  FChannels.Add(AChannel);
+end;
+
+destructor TEventMsg.Destroy;
+begin
+  FChannels.Free;
+  inherited;
+end;
+
+function TEventMsg.GetChannelByIndex(AIndex: Integer): TChannel;
+begin
+  Result := nil;
+  if (AIndex >= 0) and (AIndex < GetChannelCount) then
+    Result := FChannels[AIndex];
+end;
+
+function TEventMsg.GetChannelCount: Integer;
+begin
+  Result := FChannels.Count;
+end;
 
 end.
