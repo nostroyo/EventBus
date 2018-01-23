@@ -6,7 +6,15 @@ uses
   UChannel;
 type
 
-TEventMsg = class(TInterfacedObject)
+  IEventMsg = Interface
+  ['{662FBC7A-CA8A-41CC-A165-30E32D930843}']
+
+    function GetChannelCount: Integer;
+    procedure AddChannel(AChannel: TChannel);
+    function GetChannelByIndex(AIndex: Integer): TChannel;
+  end;
+
+  TEventMsg = class(TInterfacedObject, IEventMsg)
   strict private
     FEventDescr: string;
     FChannels: TObjectList<TChannel>;
@@ -20,7 +28,7 @@ TEventMsg = class(TInterfacedObject)
 
     property Descrition: string read FEventDescr write FEventDescr;
 
-end;
+  end;
 
 implementation
 

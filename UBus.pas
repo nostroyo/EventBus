@@ -16,12 +16,13 @@ type
 
   strict private
     FMailBoxCriticalSec: TCriticalSection;
-    FMailBox: TQueue<TEventMsg>;
+    FMailBox: TQueue<IEventMsg>;
     // Get all receiver ordered by channel
     FReceivers: TDictionary<TChannel, TList<IReceiver>>;
     FChannels: TObjectList<TChannel>;
     FTerminated: Boolean;
     FFlagIncomingMessage: TEvent;
+    FDispatchTask: ITask;
 
     procedure DispatchEvent;
   public
@@ -29,12 +30,18 @@ type
     destructor Destroy; override;
 
     procedure ConnectTo(const AMsgReceiver: IReceiver; AChannelsToSubscribe: TObjectList<TChannel>);
-//    procedure CreateNewChannel
+    procedure CreateNewChannel(const AName: string);
+    // todo : encapsulate
+    function GetChannels: TObjectList<TChannel>;
+    function SendMessage(AMsg: IEventMsg): Boolean;
+    procedure StartBus;
+    procedure StopBus;
 
-end;
+  end;
 
 implementation
-
+uses
+  Classes;
 procedure TEventBus.ConnectTo(const AMsgReceiver: IReceiver; AChannelsToSubscribe: TObjectList<TChannel>);
 var
   I: Integer;
@@ -58,14 +65,21 @@ end;
 constructor TEventBus.Create;
 begin
   FMailBoxCriticalSec := TCriticalSection.Create;
-  FMailBox := TQueue<TEventMsg>.Create;
+  FMailBox := TQueue<IEventMsg>.Create;
   FFlagIncomingMessage := TEvent.Create(nil, False, False, 'Incomming Msg');
   FReceivers := TDictionary<TChannel, TList<IReceiver>>.Create;
   FChannels := TObjectList<TChannel>.Create;
 end;
 
+procedure TEventBus.CreateNewChannel(const AName: string);
+begin
+  FChannels.Add(TChannel.Create(AName));
+end;
+
 destructor TEventBus.Destroy;
 begin
+  StopBus;
+  FDispatchTask.Wait;
   FChannels.Free;
   FReceivers.Free;
   FFlagIncomingMessage.Free;
@@ -76,12 +90,14 @@ end;
 
 procedure TEventBus.DispatchEvent;
 var
-  LMsg: TEventMsg;
+  LMsg: IEventMsg;
   I: Integer;
   LReceiverLst: TList<IReceiver>;
+  LReceiver: IReceiver;
 begin
   while not FTerminated do
   begin
+    FFlagIncomingMessage.WaitFor;
     FMailBoxCriticalSec.Enter;
     try
       LMsg := FMailBox.Dequeue;
@@ -93,10 +109,40 @@ begin
     begin
       if FReceivers.TryGetValue(LMsg.GetChannelByIndex(I), LReceiverLst) then
       begin
-
+        for LReceiver in LReceiverLst do
+        begin
+          LReceiver.ReceiveMsg(LMsg);
+        end;
       end;
     end;
   end;
+end;
+
+function TEventBus.GetChannels: TObjectList<TChannel>;
+begin
+  Result := FChannels;
+end;
+
+function TEventBus.SendMessage(AMsg: IEventMsg): Boolean;
+begin
+  FMailBoxCriticalSec.Enter;
+  try
+    FMailBox.Enqueue(AMsg);
+    FFlagIncomingMessage.SetEvent;
+  finally
+    FMailBoxCriticalSec.Leave;
+  end;
+
+end;
+
+procedure TEventBus.StartBus;
+begin
+  TTask.Create(DispatchEvent).Start;
+end;
+
+procedure TEventBus.StopBus;
+begin
+  FTerminated := True;
 end;
 
 end.
