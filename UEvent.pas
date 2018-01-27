@@ -12,12 +12,15 @@ type
     function GetChannelCount: Integer;
     procedure AddChannel(AChannel: TChannel);
     function GetChannelByIndex(AIndex: Integer): TChannel;
+    function GetDescription: string;
   end;
 
   TEventMsg = class(TInterfacedObject, IEventMsg)
   strict private
     FEventDescr: string;
     FChannels: TObjectList<TChannel>;
+  private
+    function GetDescription: string;
   public
     constructor Create(AChannel: TChannel);
     destructor Destroy; override;
@@ -26,7 +29,7 @@ type
     procedure AddChannel(AChannel: TChannel);
     function GetChannelByIndex(AIndex: Integer): TChannel;
 
-    property Descrition: string read FEventDescr write FEventDescr;
+    property Descrition: string read GetDescription write FEventDescr;
 
   end;
 
@@ -42,7 +45,7 @@ end;
 constructor TEventMsg.Create(AChannel: TChannel);
 begin
   Assert(Assigned(AChannel));
-  FChannels := TObjectList<TChannel>.Create;
+  FChannels := TObjectList<TChannel>.Create(False);
   FChannels.Add(AChannel);
 end;
 
@@ -62,6 +65,11 @@ end;
 function TEventMsg.GetChannelCount: Integer;
 begin
   Result := FChannels.Count;
+end;
+
+function TEventMsg.GetDescription: string;
+begin
+  Result := FEventDescr;
 end;
 
 end.

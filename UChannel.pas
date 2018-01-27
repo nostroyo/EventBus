@@ -8,6 +8,7 @@ type
     FName: string;
   public
     constructor Create(const AName: string);
+    property Name: string read FName write FName;
   end;
 
   TChannelBroadCast = class(TChannel)

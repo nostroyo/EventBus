@@ -2,18 +2,18 @@ unit UBus;
 
 interface
 uses
-  Threading, SyncObjs, generics.collections,
-  UEvent, UChannel;
+  Threading, SyncObjs, generics.collections, // RTL
+  LoggerPro, LoggerPro.FileAppender, // Logger
+  UEvent, UChannel; // Business
+
 type
 
   IReceiver = interface
     ['{0BBA7853-1FB2-45E9-92AE-BE38091FE8EF}']
-    procedure ReceiveMsg(AMsg: TEventMsg);
-
+    procedure ReceiveMsg(AMsg: IEventMsg);
   end;
 
   TEventBus = class
-
   strict private
     FMailBoxCriticalSec: TCriticalSection;
     FMailBox: TQueue<IEventMsg>;
@@ -33,19 +33,20 @@ type
     procedure CreateNewChannel(const AName: string);
     // todo : encapsulate
     function GetChannels: TObjectList<TChannel>;
-    function SendMessage(AMsg: IEventMsg): Boolean;
+    procedure SendMessage(AMsg: IEventMsg);
     procedure StartBus;
     procedure StopBus;
-
   end;
+
+var
+  Log: ILogWriter;
 
 implementation
 uses
   Classes;
+
 procedure TEventBus.ConnectTo(const AMsgReceiver: IReceiver; AChannelsToSubscribe: TObjectList<TChannel>);
 var
-  I: Integer;
-
   LChannel: TChannel;
   LReceiverLst: TList<IReceiver>;
 begin
@@ -69,6 +70,7 @@ begin
   FFlagIncomingMessage := TEvent.Create(nil, False, False, 'Incomming Msg');
   FReceivers := TDictionary<TChannel, TList<IReceiver>>.Create;
   FChannels := TObjectList<TChannel>.Create;
+  Log := BuildLogWriter([TLoggerProFileAppender.Create]);
 end;
 
 procedure TEventBus.CreateNewChannel(const AName: string);
@@ -79,7 +81,8 @@ end;
 destructor TEventBus.Destroy;
 begin
   StopBus;
-  FDispatchTask.Wait;
+  if Assigned(FDispatchTask) then
+    FDispatchTask.Wait;
   FChannels.Free;
   FReceivers.Free;
   FFlagIncomingMessage.Free;
@@ -97,21 +100,30 @@ var
 begin
   while not FTerminated do
   begin
-    FFlagIncomingMessage.WaitFor;
-    FMailBoxCriticalSec.Enter;
-    try
-      LMsg := FMailBox.Dequeue;
-    finally
-      FMailBoxCriticalSec.Leave;
-    end;
-
-    for I := 0 to LMsg.GetChannelCount - 1 do
+    FFlagIncomingMessage.WaitFor(5000); // Check all 5s if Terminated
+    Log.Debug('Event debloqué', 'Dispatch');
+    while (FMailBox.Count > 0) do
     begin
-      if FReceivers.TryGetValue(LMsg.GetChannelByIndex(I), LReceiverLst) then
+      FMailBoxCriticalSec.Enter;
+      try
+        Log.Debug('Enter critical section', 'Dispatch');
+        LMsg := FMailBox.Dequeue;
+        Log.DebugFmt('Message dequeue : %s', [LMsg.GetDescription], 'Dispatch');
+      finally
+        Log.Debug('leave critical section', 'Dispatch');
+        FMailBoxCriticalSec.Leave;
+      end;
+
+      for I := 0 to LMsg.GetChannelCount - 1 do
       begin
-        for LReceiver in LReceiverLst do
+        Log.DebugFmt('Message %s sur channel %s', [LMsg.GetDescription, LMsg.GetChannelByIndex(I).Name], 'Dispatch');
+        if FReceivers.TryGetValue(LMsg.GetChannelByIndex(I), LReceiverLst) then
         begin
-          LReceiver.ReceiveMsg(LMsg);
+          Log.DebugFmt('Il y a %d receiver pour le msg %s' , [LReceiverLst.Count, LMsg.GetDescription], 'Dispatch');
+          for LReceiver in LReceiverLst do
+          begin
+            LReceiver.ReceiveMsg(LMsg);
+          end;
         end;
       end;
     end;
@@ -123,13 +135,16 @@ begin
   Result := FChannels;
 end;
 
-function TEventBus.SendMessage(AMsg: IEventMsg): Boolean;
+procedure TEventBus.SendMessage(AMsg: IEventMsg);
 begin
   FMailBoxCriticalSec.Enter;
   try
+    Log.Debug('Enter critical section', 'SendMsg');
     FMailBox.Enqueue(AMsg);
+    Log.DebugFmt('Message envoye : %s', [AMsg.GetDescription], 'SendMsg');
     FFlagIncomingMessage.SetEvent;
   finally
+    Log.Debug('Leave critical section', 'SendMsg');
     FMailBoxCriticalSec.Leave;
   end;
 
