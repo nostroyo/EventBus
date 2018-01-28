@@ -79,11 +79,17 @@ begin
 end;
 
 destructor TEventBus.Destroy;
+var
+  LReciverList: TList<IReceiver>;
 begin
   StopBus;
   if Assigned(FDispatchTask) then
     FDispatchTask.Wait;
   FChannels.Free;
+  for LReciverList in FReceivers.Values do
+  begin
+    LReciverList.Free;
+  end;
   FReceivers.Free;
   FFlagIncomingMessage.Free;
   FMailBox.Free;
@@ -100,8 +106,8 @@ var
 begin
   while not FTerminated do
   begin
-    FFlagIncomingMessage.WaitFor(5000); // Check all 5s if Terminated
-    Log.Debug('Event debloqué', 'Dispatch');
+    FFlagIncomingMessage.WaitFor;
+    Log.Debug('Unlock Event', 'Dispatch');
     while (FMailBox.Count > 0) do
     begin
       FMailBoxCriticalSec.Enter;
@@ -116,10 +122,10 @@ begin
 
       for I := 0 to LMsg.GetChannelCount - 1 do
       begin
-        Log.DebugFmt('Message %s sur channel %s', [LMsg.GetDescription, LMsg.GetChannelByIndex(I).Name], 'Dispatch');
+        Log.DebugFmt('Message %s on channel %s', [LMsg.GetDescription, LMsg.GetChannelByIndex(I).Name], 'Dispatch');
         if FReceivers.TryGetValue(LMsg.GetChannelByIndex(I), LReceiverLst) then
         begin
-          Log.DebugFmt('Il y a %d receiver pour le msg %s' , [LReceiverLst.Count, LMsg.GetDescription], 'Dispatch');
+          Log.DebugFmt('%d receiver on msg %s' , [LReceiverLst.Count, LMsg.GetDescription], 'Dispatch');
           for LReceiver in LReceiverLst do
           begin
             LReceiver.ReceiveMsg(LMsg);
@@ -141,7 +147,7 @@ begin
   try
     Log.Debug('Enter critical section', 'SendMsg');
     FMailBox.Enqueue(AMsg);
-    Log.DebugFmt('Message envoye : %s', [AMsg.GetDescription], 'SendMsg');
+    Log.DebugFmt('Message send : %s', [AMsg.GetDescription], 'SendMsg');
     FFlagIncomingMessage.SetEvent;
   finally
     Log.Debug('Leave critical section', 'SendMsg');
@@ -152,12 +158,13 @@ end;
 
 procedure TEventBus.StartBus;
 begin
-  TTask.Create(DispatchEvent).Start;
+  FDispatchTask := TTask.Create(DispatchEvent).Start;
 end;
 
 procedure TEventBus.StopBus;
 begin
   FTerminated := True;
+  FFlagIncomingMessage.SetEvent;  //  unlock the event to close the threaded dispatcher func
 end;
 
 end.
