@@ -43,22 +43,27 @@ var
 
 implementation
 uses
-  Classes;
+  Classes, {Sysutils};
 
 procedure TEventBus.ConnectTo(const AMsgReceiver: IReceiver; AChannelsToSubscribe: TObjectList<TChannel>);
 var
   LChannel: TChannel;
   LReceiverLst: TList<IReceiver>;
 begin
-  for LChannel in AChannelsToSubscribe do
+  FReceivers.TryGetValue(FChannels[0], LReceiverLst);
+  LReceiverLst.Add(AMsgReceiver);
+  if Assigned(AChannelsToSubscribe) then
   begin
-    if FReceivers.TryGetValue(LChannel, LReceiverLst) then
-      LReceiverLst.Add(AMsgReceiver)
-    else
+    for LChannel in AChannelsToSubscribe do
     begin
-      LReceiverLst := TList<IReceiver>.Create;
-      LReceiverLst.Add(AMsgReceiver);
-      FReceivers.Add(LChannel, LReceiverLst);
+      if FReceivers.TryGetValue(LChannel, LReceiverLst) then
+        LReceiverLst.Add(AMsgReceiver)
+      else
+      begin
+        LReceiverLst := TList<IReceiver>.Create;
+        LReceiverLst.Add(AMsgReceiver);
+        FReceivers.Add(LChannel, LReceiverLst);
+      end;
     end;
   end;
 end;
@@ -70,6 +75,9 @@ begin
   FFlagIncomingMessage := TEvent.Create(nil, False, False, 'Incomming Msg');
   FReceivers := TDictionary<TChannel, TList<IReceiver>>.Create;
   FChannels := TObjectList<TChannel>.Create;
+  FChannels.Add(TChannelBroadCast.Create('WARNING Broadcast'));
+  // FChannels[0] ALWAYS BroadcastChannel
+  FReceivers.Add(FChannels[0], TList<IReceiver>.Create);
   Log := BuildLogWriter([TLoggerProFileAppender.Create]);
 end;
 
@@ -84,7 +92,7 @@ var
 begin
   StopBus;
   if Assigned(FDispatchTask) then
-    FDispatchTask.Wait;
+    TTask.WaitForAll([FDispatchTask]);
   FChannels.Free;
   for LReciverList in FReceivers.Values do
   begin
@@ -99,19 +107,36 @@ end;
 
 procedure TEventBus.DispatchEvent;
 var
+  LChannel: UChannel.TChannel;
   LMsg: IEventMsg;
   I: Integer;
   LReceiverLst: TList<IReceiver>;
-  LReceiver: IReceiver;
+  LReceiverPair: TPair<TChannel, TList<IReceiver>>;
+
+  procedure SendMsg;
+  var
+    LReceiver: IReceiver;
+  begin
+    for LReceiver in LReceiverLst do
+    begin
+      LReceiver.ReceiveMsg(LMsg);
+    end;
+  end;
+
 begin
   while not FTerminated do
   begin
     FFlagIncomingMessage.WaitFor;
     Log.Debug('Unlock Event', 'Dispatch');
-    while (FMailBox.Count > 0) do
+    while true do
     begin
       FMailBoxCriticalSec.Enter;
       try
+        //Sleep(1000); Test Slow BUS
+        if (FMailBox.Count = 0) then
+        begin
+          Break;
+        end;
         Log.Debug('Enter critical section', 'Dispatch');
         LMsg := FMailBox.Dequeue;
         Log.DebugFmt('Message dequeue : %s', [LMsg.GetDescription], 'Dispatch');
@@ -119,16 +144,26 @@ begin
         Log.Debug('leave critical section', 'Dispatch');
         FMailBoxCriticalSec.Leave;
       end;
-
       for I := 0 to LMsg.GetChannelCount - 1 do
       begin
-        Log.DebugFmt('Message %s on channel %s', [LMsg.GetDescription, LMsg.GetChannelByIndex(I).Name], 'Dispatch');
-        if FReceivers.TryGetValue(LMsg.GetChannelByIndex(I), LReceiverLst) then
+        LChannel := LMsg.GetChannelByIndex(I);
+        Log.DebugFmt('Message %s on channel %s',
+          [LMsg.GetDescription, LChannel.Name], 'Dispatch');
+        if not (LChannel is TChannelBroadCast) then
         begin
-          Log.DebugFmt('%d receiver on msg %s' , [LReceiverLst.Count, LMsg.GetDescription], 'Dispatch');
-          for LReceiver in LReceiverLst do
+          if FReceivers.TryGetValue(LChannel, LReceiverLst) then
           begin
-            LReceiver.ReceiveMsg(LMsg);
+            Log.DebugFmt('%d receiver on msg %s',
+              [LReceiverLst.Count, LMsg.GetDescription], 'Dispatch');
+            SendMsg;
+          end;
+        end
+        else
+        begin
+          for LReceiverPair in FReceivers do
+          begin
+            LReceiverLst := LReceiverPair.Value;
+            SendMsg;
           end;
         end;
       end;

@@ -44,7 +44,6 @@ end;
 
 constructor TEventMsg.Create(AChannel: TChannel);
 begin
-  Assert(Assigned(AChannel));
   FChannels := TObjectList<TChannel>.Create(False);
   FChannels.Add(AChannel);
 end;
