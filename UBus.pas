@@ -20,6 +20,7 @@ type
     // Get all receiver ordered by channel
     FReceivers: TDictionary<TChannel, TList<IReceiver>>;
     FChannels: TObjectList<TChannel>;
+    FBroadcastChannel: TChannelBroadCast;
     FTerminated: Boolean;
     FFlagIncomingMessage: TEvent;
     FDispatchTask: ITask;
@@ -29,13 +30,14 @@ type
     constructor Create;
     destructor Destroy; override;
 
-    procedure ConnectTo(const AMsgReceiver: IReceiver; AChannelsToSubscribe: TObjectList<TChannel>);
-    procedure CreateNewChannel(const AName: string);
-    // todo : encapsulate
-    function GetChannels: TObjectList<TChannel>;
+    procedure ConnectTo(const AMsgReceiver: IReceiver; AChannelsToSubscribe: TArray<TChannel>);
+    function CreateNewChannel(const AName: string): TChannel;
+    function GetChannels: TEnumerator<TChannel>;
     procedure SendMessage(AMsg: IEventMsg);
     procedure StartBus;
     procedure StopBus;
+
+    property BroadcastChannel: TChannelBroadCast read FBroadcastChannel write FBroadcastChannel;
   end;
 
 var
@@ -43,14 +45,15 @@ var
 
 implementation
 uses
-  Classes, {Sysutils};
+  Classes{, Sysutils};
 
-procedure TEventBus.ConnectTo(const AMsgReceiver: IReceiver; AChannelsToSubscribe: TObjectList<TChannel>);
+procedure TEventBus.ConnectTo(const AMsgReceiver: IReceiver; AChannelsToSubscribe: TArray<TChannel>);
 var
   LChannel: TChannel;
   LReceiverLst: TList<IReceiver>;
+  I: Integer;
 begin
-  FReceivers.TryGetValue(FChannels[0], LReceiverLst);
+  FReceivers.TryGetValue(FBroadcastChannel, LReceiverLst);
   LReceiverLst.Add(AMsgReceiver);
   if Assigned(AChannelsToSubscribe) then
   begin
@@ -75,15 +78,18 @@ begin
   FFlagIncomingMessage := TEvent.Create(nil, False, False, 'Incomming Msg');
   FReceivers := TDictionary<TChannel, TList<IReceiver>>.Create;
   FChannels := TObjectList<TChannel>.Create;
-  FChannels.Add(TChannelBroadCast.Create('WARNING Broadcast'));
-  // FChannels[0] ALWAYS BroadcastChannel
-  FReceivers.Add(FChannels[0], TList<IReceiver>.Create);
+  FBroadcastChannel := TChannelBroadCast.Create('WARNING SPECIAL BROADCAST CHANNEL');
+  FReceivers.Add(FBroadcastChannel, TList<IReceiver>.Create);
   Log := BuildLogWriter([TLoggerProFileAppender.Create]);
 end;
 
-procedure TEventBus.CreateNewChannel(const AName: string);
+function TEventBus.CreateNewChannel(const AName: string): TChannel;
+var
+  LCreatedChannel: UChannel.TChannel;
 begin
-  FChannels.Add(TChannel.Create(AName));
+  LCreatedChannel := TChannel.Create(AName);
+  FChannels.Add(LCreatedChannel);
+  Result := LCreatedChannel;
 end;
 
 destructor TEventBus.Destroy;
@@ -93,6 +99,7 @@ begin
   StopBus;
   if Assigned(FDispatchTask) then
     TTask.WaitForAll([FDispatchTask]);
+  FBroadcastChannel.Free;
   FChannels.Free;
   for LReciverList in FReceivers.Values do
   begin
@@ -149,31 +156,20 @@ begin
         LChannel := LMsg.GetChannelByIndex(I);
         Log.DebugFmt('Message %s on channel %s',
           [LMsg.GetDescription, LChannel.Name], 'Dispatch');
-        if not (LChannel is TChannelBroadCast) then
+        if FReceivers.TryGetValue(LChannel, LReceiverLst) then
         begin
-          if FReceivers.TryGetValue(LChannel, LReceiverLst) then
-          begin
-            Log.DebugFmt('%d receiver on msg %s',
-              [LReceiverLst.Count, LMsg.GetDescription], 'Dispatch');
-            SendMsg;
-          end;
-        end
-        else
-        begin
-          for LReceiverPair in FReceivers do
-          begin
-            LReceiverLst := LReceiverPair.Value;
-            SendMsg;
-          end;
+          Log.DebugFmt('%d receiver on msg %s',
+            [LReceiverLst.Count, LMsg.GetDescription], 'Dispatch');
+          SendMsg;
         end;
       end;
     end;
   end;
 end;
 
-function TEventBus.GetChannels: TObjectList<TChannel>;
+function TEventBus.GetChannels: TEnumerator<TChannel>;
 begin
-  Result := FChannels;
+  Result := FChannels.GetEnumerator;
 end;
 
 procedure TEventBus.SendMessage(AMsg: IEventMsg);
