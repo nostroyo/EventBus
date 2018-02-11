@@ -19,7 +19,7 @@ type
     FMailBox: TQueue<IEventMsg>;
     // Get all receiver ordered by channel
     FReceivers: TDictionary<TChannel, TList<IReceiver>>;
-    FChannels: TObjectList<TChannel>;
+    FChannels: TDictionary<string, TChannel>;
     FBroadcastChannel: TChannelBroadCast;
     FTerminated: Boolean;
     FFlagIncomingMessage: TEvent;
@@ -32,7 +32,7 @@ type
 
     procedure ConnectTo(const AMsgReceiver: IReceiver; AChannelsToSubscribe: TArray<TChannel>);
     function CreateNewChannel(const AName: string): TChannel;
-    function GetChannels: TEnumerator<TChannel>;
+    function GetChannelByName(const AName: string): TChannel;
     procedure SendMessage(AMsg: IEventMsg);
     procedure StartBus;
     procedure StopBus;
@@ -45,7 +45,7 @@ var
 
 implementation
 uses
-  Classes{, Sysutils};
+  Classes, Sysutils;
 
 procedure TEventBus.ConnectTo(const AMsgReceiver: IReceiver; AChannelsToSubscribe: TArray<TChannel>);
 var
@@ -77,8 +77,9 @@ begin
   FMailBox := TQueue<IEventMsg>.Create;
   FFlagIncomingMessage := TEvent.Create(nil, False, False, 'Incomming Msg');
   FReceivers := TDictionary<TChannel, TList<IReceiver>>.Create;
-  FChannels := TObjectList<TChannel>.Create;
-  FBroadcastChannel := TChannelBroadCast.Create('WARNING SPECIAL BROADCAST CHANNEL');
+  FChannels := TDictionary<string, TChannel>.Create;
+  FBroadcastChannel := TChannelBroadCast.Create(TChannelBroadCast.BROADCAST_NAME);
+  FBroadcastChannel.Description := 'WARNING SPECIAL BROADCAST CHANNEL';
   FReceivers.Add(FBroadcastChannel, TList<IReceiver>.Create);
   Log := BuildLogWriter([TLoggerProFileAppender.Create]);
 end;
@@ -88,18 +89,23 @@ var
   LCreatedChannel: UChannel.TChannel;
 begin
   LCreatedChannel := TChannel.Create(AName);
-  FChannels.Add(LCreatedChannel);
+  FChannels.Add(AName, LCreatedChannel);
   Result := LCreatedChannel;
 end;
 
 destructor TEventBus.Destroy;
 var
   LReciverList: TList<IReceiver>;
+  LChannel: TChannel;
 begin
   StopBus;
   if Assigned(FDispatchTask) then
     TTask.WaitForAll([FDispatchTask]);
   FBroadcastChannel.Free;
+  for LChannel in FChannels.Values do
+  begin
+    LChannel.Free
+  end;
   FChannels.Free;
   for LReciverList in FReceivers.Values do
   begin
@@ -139,7 +145,7 @@ begin
     begin
       FMailBoxCriticalSec.Enter;
       try
-        //Sleep(1000); Test Slow BUS
+//        Sleep(1000); //Test Slow BUS
         if (FMailBox.Count = 0) then
         begin
           Break;
@@ -167,9 +173,9 @@ begin
   end;
 end;
 
-function TEventBus.GetChannels: TEnumerator<TChannel>;
+function TEventBus.GetChannelByName(const AName: string): TChannel;
 begin
-  Result := FChannels.GetEnumerator;
+  FChannels.TryGetValue(AName, Result);
 end;
 
 procedure TEventBus.SendMessage(AMsg: IEventMsg);
